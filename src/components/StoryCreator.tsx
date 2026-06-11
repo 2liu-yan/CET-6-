@@ -397,6 +397,12 @@ export default function StoryCreator({
           }
         }
 
+        // Try Route 5: Fallback if the clean row is just a single English word
+        if (!word && /^[a-zA-Z\s\-']+$/.test(clean) && clean.length >= 2) {
+          word = clean;
+          translation = "核心词汇";
+        }
+
         if (word && translation) {
           const lowerW = word.toLowerCase();
           if (!seenWords.has(lowerW)) {
@@ -407,6 +413,45 @@ export default function StoryCreator({
               phonetic,
               example: "来自于您的自选词表。",
               pageNumber: currentParsedPage
+            });
+          }
+        }
+      }
+    }
+
+    // Ultimate fallback: if no word-translation pairs are parsed, do a token extraction
+    if (parsedItems.length === 0) {
+      // Find all English words of reasonable length
+      const tokens = contents.match(/[a-zA-Z\s\-']+/g) || [];
+      const STOP_WORDS = new Set(["the", "and", "are", "you", "for", "with", "this", "that", "from", "your", "have", "will", "shall", "would", "should", "their", "them", "then", "there", "they"]);
+      
+      let pPage = 1;
+      const allLines = contents.split(/\r?\n/);
+      
+      for (let ln of allLines) {
+        ln = ln.trim();
+        if (!ln) continue;
+        if (ln.startsWith("==Start of Page ")) {
+          const pageMatch = ln.match(/==Start of Page (\d+)==/);
+          if (pageMatch) pPage = parseInt(pageMatch[1], 10);
+          continue;
+        }
+        
+        // Extract individual word tokens from this line
+        const wordsInLine = ln.match(/[a-zA-Z\-']+/g) || [];
+        for (const w of wordsInLine) {
+          if (w.length < 3 || w.length > 20) continue;
+          const lowerW = w.toLowerCase();
+          if (STOP_WORDS.has(lowerW)) continue;
+          
+          if (!seenWords.has(lowerW)) {
+            seenWords.add(lowerW);
+            parsedItems.push({
+              word: w,
+              translation: "重点生词",
+              phonetic: "[英美发音]",
+              example: "来自于您的自选词表。",
+              pageNumber: pPage
             });
           }
         }

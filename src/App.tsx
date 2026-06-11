@@ -35,12 +35,19 @@ export default function App() {
 
   // Wordbook Custom Boards State
   const [customBoards, setCustomBoards] = useState<CustomBoard[]>(() => {
-    const saved = localStorage.getItem("cet6_custom_boards");
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem("cet6_custom_boards");
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error("Failed to parse cet6_custom_boards:", e);
+      return [];
+    }
   });
 
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(() => {
-    return localStorage.getItem("cet6_selected_board_id") || null;
+    const saved = localStorage.getItem("cet6_selected_board_id");
+    if (saved === "null" || saved === "undefined") return null;
+    return saved || null;
   });
 
   const [activePageNum, setActivePageNum] = useState<number>(1);
@@ -68,14 +75,24 @@ export default function App() {
 
   // Mastered Words list state
   const [masteredWords, setMasteredWords] = useState<string[]>(() => {
-    const saved = localStorage.getItem("cet6_mastered_words");
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem("cet6_mastered_words");
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error("Failed to parse cet6_mastered_words:", e);
+      return [];
+    }
   });
 
   // Bookmarked Words list state
   const [bookmarkedWords, setBookmarkedWords] = useState<string[]>(() => {
-    const saved = localStorage.getItem("cet6_bookmarked_words");
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem("cet6_bookmarked_words");
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error("Failed to parse cet6_bookmarked_words:", e);
+      return [];
+    }
   });
 
   // Currently playing / Studying story selection (For Predefined Default Book)

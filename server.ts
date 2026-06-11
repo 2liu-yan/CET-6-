@@ -3,15 +3,15 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-// @ts-ignore
-import pdfParse from "pdf-parse";
+import { createRequire } from "module";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // API endpoint to generate story using Gemini 3.5-flash
 app.post("/api/stories/generate", async (req, res) => {
@@ -137,6 +137,8 @@ app.post("/api/parse-pdf", async (req, res) => {
   }
 
   try {
+    const require = createRequire(import.meta.url);
+    const pdfParse = require("pdf-parse");
     const dataBuffer = Buffer.from(fileBase64, "base64");
     
     // Custom page rendering function to inject Page Boundaries

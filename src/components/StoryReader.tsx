@@ -137,9 +137,9 @@ export default function StoryReader({
   const masteryPercent = Math.round((completedCount / story.words.length) * 100);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start text-[#1A1A1A]">
+    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 items-start text-[#1A1A1A]">
       {/* Narrative Section */}
-      <div className="lg:col-span-8 space-y-6">
+      <div className="md:col-span-7 lg:col-span-8 space-y-6">
         <div className="bg-[#FAF9F6] border border-[#1A1A1A]/10 rounded-2xl p-6 md:p-8 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4 mb-8 border-b border-[#1A1A1A]/10 pb-6">
             <div className="flex items-start gap-4">
@@ -332,7 +332,7 @@ export default function StoryReader({
       </div>
 
       {/* Vocabulary Detail Panel / Selection Card */}
-      <div className="lg:col-span-4 space-y-6">
+      <div className="md:col-span-5 lg:col-span-4 space-y-6">
         <div className="bg-[#FAF9F6] border border-[#1A1A1A]/10 rounded-2xl p-6 shadow-sm sticky top-24">
           <h3 className="text-xs font-bold text-[#1A1A1A] font-serif uppercase tracking-widest mb-4 pb-2 border-b border-[#1A1A1A]/10 flex items-center gap-2">
             <span className="w-5 h-px bg-[#1A1A1A]"></span> 词卡详释 Repository

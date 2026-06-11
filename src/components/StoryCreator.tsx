@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Sparkles, FileText, ChevronRight, HelpCircle, Loader, RefreshCw, AlertCircle, Trash2, Upload, FileUp, Check, BookOpen, Clock } from "lucide-react";
 import { Story, WordItem } from "../predefinedStories";
+import * as XLSX from "xlsx";
 
 interface StoryCreatorProps {
   onStoryGenerated: (story: Story) => void;
@@ -93,121 +94,391 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
     }
   };
 
-  // Parsing Core Algorithm - matches CSV, TXT, word pairs, numbering, POS tags, and OCR pages
+  // Load and Parse PDF files client-side using PDF.js CDN
+  const loadAndParsePDF = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+    // Ensure pdf.js is loaded dynamically if not present
+    await new Promise<void>((resolve, reject) => {
+      if ((window as any).pdfjsLib || (window as any)['pdfjs-dist/build/pdf']) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("高精度 PDF 解析器驱动包加载失败，请检查网络连接！"));
+      document.head.appendChild(script);
+    });
+
+    const pdfjsLib = (window as any).pdfjsLib || (window as any)['pdfjs-dist/build/pdf'];
+    if (!pdfjsLib) {
+      throw new Error("PDF 解析器初始化不完整，请稍后刷新重试！");
+    }
+
+    // Configure worker from CDN to optimize multi-page streaming
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js";
+
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+    
+    let completeText = "";
+    
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const items = textContent.items as any[];
+      
+      const linesMap: { [key: number]: any[] } = {};
+      const tolerance = 4; // Tolerance distance for row alignment
+      
+      items.forEach((item) => {
+        if (!item.str || !item.str.trim()) return;
+        const y = item.transform[5];
+        const x = item.transform[4];
+        
+        let foundYKey: number | null = null;
+        for (const existingY of Object.keys(linesMap).map(Number)) {
+          if (Math.abs(existingY - y) <= tolerance) {
+            foundYKey = existingY;
+            break;
+          }
+        }
+        
+        if (foundYKey !== null) {
+          linesMap[foundYKey].push({ x, str: item.str });
+        } else {
+          linesMap[y] = [{ x, str: item.str }];
+        }
+      });
+      
+      // Sort baselines descending (top-to-bottom on page layout)
+      const sortedBaselines = Object.keys(linesMap)
+        .map(Number)
+        .sort((a, b) => b - a);
+        
+      let pageText = "";
+      sortedBaselines.forEach((y) => {
+        const rowItems = linesMap[y].sort((a, b) => a.x - b.x);
+        let lineStr = "";
+        let prevXEnd = -1;
+        
+        rowItems.forEach((item, index) => {
+          if (index === 0) {
+            lineStr += item.str;
+          } else {
+            const gap = item.x - prevXEnd;
+            if (gap > 12) {
+              lineStr += "    " + item.str; // Broad spaces perfectly retain dual-side splits
+            } else {
+              lineStr += " " + item.str;
+            }
+          }
+          prevXEnd = item.x + (item.str.length * 6); // rough characters-width estimation
+        });
+        
+        pageText += lineStr + "\n";
+      });
+      
+      completeText += `==Start of Page ${pageNum}==\n` + pageText + `==End of Page ${pageNum}==\n\n`;
+    }
+    
+    return completeText;
+  };
+
+  // Parsing Core Algorithm - matches CSV, TXT, Excel sheets, JSON dictionary lists, multi-column PDF layouts, and dual-side OCR
   const processFile = (file: File) => {
     setErrorMsg("");
     setSuccessMsg("");
     
     // Validate extensions
     const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-    if (ext !== ".txt" && ext !== ".csv") {
-      setErrorMsg("目前支持上传 .txt 文本生词本或 .csv 通用数据文件，请检查您的文件格式！");
+    const allowedExtensions = [".txt", ".csv", ".md", ".json", ".xlsx", ".xls", ".pdf"];
+    if (!allowedExtensions.includes(ext)) {
+      setErrorMsg("目前支持上传 .pdf, .txt, .csv, .md, .json, .xlsx, .xls 等生词本格式！请检查您的文件。");
       return;
     }
 
+    const isExcel = ext === ".xlsx" || ext === ".xls";
+    const isPDF = ext === ".pdf";
+    const isBinary = isExcel || isPDF;
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const contents = event.target?.result as string;
-      if (!contents) {
-        setErrorMsg("抱歉，读取生词本文件失败。");
-        return;
+
+    reader.onload = async (event) => {
+      try {
+        let wordsList: WordItem[] = [];
+        
+        if (isPDF) {
+          const arrayBuffer = event.target?.result as ArrayBuffer;
+          setSuccessMsg("正为您启动高精度 PDF 引擎，智能重构词表排版并提取词组...");
+          const text = await loadAndParsePDF(arrayBuffer);
+          wordsList = parseGenericList(text);
+        } else if (isExcel) {
+          const arrayBuffer = event.target?.result as ArrayBuffer;
+          wordsList = parseExcelList(arrayBuffer);
+        } else {
+          const contents = event.target?.result as string;
+          if (!contents) {
+            setErrorMsg("抱歉，读取生词本文件内容为空或失败。");
+            return;
+          }
+          
+          if (ext === ".json") {
+            wordsList = parseJsonList(contents);
+          } else {
+            wordsList = parseGenericList(contents);
+          }
+        }
+
+        if (wordsList.length === 0) {
+          setErrorMsg("未能从此文件里成功识别到 [英文单词] 及其 [中/英文释义]，请检查格式是否匹配建议指南。");
+          return;
+        }
+
+        setParsingResult({
+          fileName: file.name,
+          words: wordsList
+        });
+
+        // Default all parsed words to selected
+        const selectedMap: Record<string, boolean> = {};
+        wordsList.forEach(w => {
+          selectedMap[w.word.toLowerCase()] = true;
+        });
+        setSelectedUploadWords(selectedMap);
+        setSuccessMsg(`成功解析文件 ${file.name}，共智能识别并配对过滤出 ${wordsList.length} 个单词生词对！`);
+      } catch (err: any) {
+        console.error(err);
+        setErrorMsg(`解析文件时发生错误: ${err.message || err}`);
       }
-
-      // Parse logic
-      const wordsList = parseGenericList(contents);
-      if (wordsList.length === 0) {
-        setErrorMsg("未能从此文件里识别到有效的 [英文单词] 及 [中文翻译] 配对，请参考底部的格式导引。");
-        return;
-      }
-
-      setParsingResult({
-        fileName: file.name,
-        words: wordsList
-      });
-
-      // Default all parsed words to selected
-      const selectedMap: Record<string, boolean> = {};
-      wordsList.forEach(w => {
-        selectedMap[w.word.toLowerCase()] = true;
-      });
-      setSelectedUploadWords(selectedMap);
-      setSuccessMsg(`成功解析文件 ${file.name}，共识别到 ${wordsList.length} 个单词生词对！`);
     };
 
     reader.onerror = () => {
-      setErrorMsg("在读取文件时发生错误！");
+      setErrorMsg("在读取外置文件流时发生系统错误！");
     };
 
-    reader.readAsText(file);
+    if (isBinary) {
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.readAsText(file);
+    }
   };
 
+  // Extract from binary Excel sheet arrays
+  const parseExcelList = (arrayBuffer: ArrayBuffer): WordItem[] => {
+    const data = new Uint8Array(arrayBuffer);
+    const workbook = XLSX.read(data, { type: "array" });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    // Read raw grid columns
+    const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+    
+    const parsedItems: WordItem[] = [];
+    const seenWords = new Set<string>();
+
+    for (const row of rawData) {
+      if (!row || row.length === 0) continue;
+      
+      let wordCandidate = "";
+      let translationCandidate = "";
+      
+      // Analyze types inside each row dynamically (enables column position flexibility!)
+      for (const cell of row) {
+        if (cell === null || cell === undefined) continue;
+        const valStr = String(cell).trim();
+        if (!valStr) continue;
+        
+        // Pure english candidate checklist vs Chinese/non-english translation candidate checklist
+        if (/^[a-zA-Z\s\-']+$/.test(valStr) && valStr.length >= 2 && valStr.length <= 45) {
+          if (!wordCandidate) wordCandidate = valStr;
+        } else if (/[\u4e00-\u9fa5]/.test(valStr)) {
+          if (!translationCandidate) translationCandidate = valStr;
+        }
+      }
+      
+      // Fallback matching if cells are mixed but follow simple layout: col-1 as word, col-2 as description
+      if (!wordCandidate && row.length >= 2) {
+        const first = String(row[0]).trim();
+        const second = String(row[1]).trim();
+        if (/^[a-zA-Z\s\-']+$/.test(first) && first.length >= 2) {
+          wordCandidate = first;
+          translationCandidate = second;
+        }
+      }
+      
+      if (wordCandidate && translationCandidate) {
+        const lowerW = wordCandidate.toLowerCase();
+        if (!seenWords.has(lowerW)) {
+          seenWords.add(lowerW);
+          parsedItems.push({
+            word: wordCandidate,
+            translation: translationCandidate,
+            phonetic: "[英美发音]",
+            example: "来自于您的 Excel 形式背词表。"
+          });
+        }
+      }
+    }
+    
+    return parsedItems;
+  };
+
+  // Load word deck structures from JSON dict configurations
+  const parseJsonList = (contents: string): WordItem[] => {
+    try {
+      const data = JSON.parse(contents);
+      const parsedItems: WordItem[] = [];
+      const seenWords = new Set<string>();
+
+      const addWord = (w: string, t: string) => {
+        const cleanW = w.trim();
+        const cleanT = t.trim();
+        // Skip keys that don't match standard English boundaries
+        if (!cleanW || !cleanT || !/^[a-zA-Z\s\-']+$/.test(cleanW)) return;
+        const lowerW = cleanW.toLowerCase();
+        if (!seenWords.has(lowerW)) {
+          seenWords.add(lowerW);
+          parsedItems.push({
+            word: cleanW,
+            translation: cleanT,
+            phonetic: "[英美发音]",
+            example: "来自于您的 JSON 数据辞典。"
+          });
+        }
+      };
+
+      if (Array.isArray(data)) {
+        // Option 1: Object dictionary array [{"word": "apple", "translation": "苹果"}, ...]
+        for (const item of data) {
+          if (item && typeof item === "object") {
+            const word = item.word || item.vocab || item.eng || item.english || "";
+            const translation = item.translation || item.meaning || item.chinese || item.explain || item.chinese_meaning || "";
+            if (word && translation) {
+              addWord(String(word), String(translation));
+            }
+          }
+        }
+      } else if (data && typeof data === "object") {
+        // Option 2: Pure Key-Value dictionary {"apple": "苹果", "banana": "香蕉"}
+        for (const [key, val] of Object.entries(data)) {
+          if (val && typeof val === "string") {
+            addWord(key, val);
+          }
+        }
+      }
+      return parsedItems;
+    } catch {
+      return [];
+    }
+  };
+
+  // Powerful parser that handles mixed lines, side-by-side columns copied from PDF view grids
   const parseGenericList = (contents: string): WordItem[] => {
     const lines = contents.split(/\r?\n/);
     const parsedItems: WordItem[] = [];
     const seenWords = new Set<string>();
 
-    for (let line of lines) {
-      line = line.trim();
-      if (!line) continue;
+    for (let rawLine of lines) {
+      rawLine = rawLine.trim();
+      if (!rawLine) continue;
 
-      // Ignore common PDF/OCR metadata header/footers
-      if (/^(word\s+meaning|word|meaning)$/i.test(line)) continue;
-      if (/^\d+\s*\/\s*\d+\s*$/i.test(line)) continue; // 1/391
-      if (/共\s*\d+\s*词/i.test(line)) continue;      // 共 7803 词
-      if (line.includes("不背单词") || line.includes("纸上默写")) continue;
+      // Filter out general table headers, footer counters or metadata lines
+      if (/^(word\s+meaning|word|meaning)$/i.test(rawLine)) continue;
+      if (/^\d+\s*\/\s*\d+\s*$/i.test(rawLine)) continue; 
+      if (/共\s*\d+\s*词/i.test(rawLine)) continue;      
+      if (rawLine.includes("不背单词") || rawLine.includes("纸上默写")) continue;
 
-      // Strip leading digits and dots/spaces (e.g. "1 ambition", "480. compromise", "21\t")
-      let clean = line.replace(/^\d+[\s\t\.\、\-]+/i, "").trim();
+      // Splitting candidate row columns
+      // Step A: Split on long space intervals (e.g. 3 or more spaces), highly common for side-by-side copies
+      const initialParts = rawLine.split(/\s{3,}/).map(x => x.trim()).filter(x => x.length > 0);
+      const subColumns: string[] = [];
 
-      let word = "";
-      let translation = "";
+      for (const part of initialParts) {
+        // Step B: Split inside columns if we find a serial index prefix followed by English letters
+        // (e.g. "1 you [juː] ... 22 no [nəʊ]" copy merged on a single line)
+        const indices: number[] = [0];
+        const seqRegex = /\s+(\d+)\s+([a-zA-Z])/g;
+        let seqMatch;
+        while ((seqMatch = seqRegex.exec(part)) !== null) {
+          indices.push(seqMatch.index);
+        }
+        indices.push(part.length);
 
-      // Try CSV separation [word, translation]
-      if (clean.includes(",")) {
-        const commaIdx = clean.indexOf(",");
-        const wTemp = clean.substring(0, commaIdx).trim();
-        const mTemp = clean.substring(commaIdx + 1).trim();
-        // Exclude lines where the first part is clearly not an English word
-        if (/^[a-zA-Z\s\-']+$/.test(wTemp)) {
-          word = wTemp;
-          translation = mTemp;
+        for (let i = 0; i < indices.length - 1; i++) {
+          subColumns.push(part.substring(indices[i], indices[i+1]).trim());
         }
       }
 
-      // Try tab separation [word \t translation]
-      if (!word && clean.includes("\t")) {
-        const parts = clean.split("\t").map(x => x.trim()).filter(x => x.length > 0);
-        if (parts.length >= 2) {
-          if (/^[a-zA-Z\s\-']+$/.test(parts[0])) {
-            word = parts[0];
-            translation = parts.slice(1).join(" ");
-          }
-        }
-      }
+      for (const col of subColumns) {
+        if (!col) continue;
 
-      // Try regex separation: word (English letters/space/-/') followed by meaning
-      if (!word) {
-        const match = clean.match(/^([a-zA-Z\s\-']+?)[\s\t]+(.*)$/);
-        if (match) {
-          const wTemp = match[1].trim();
-          const mTemp = match[2].trim();
-          if (wTemp.length > 1 && mTemp.length > 0) {
+        // Clean leading indicators like "1. ", "42 ", "211、"
+        let clean = col.replace(/^\d+[\s\t\.\、\-]+/i, "").trim();
+        if (!clean) continue;
+
+        let word = "";
+        let translation = "";
+        let phonetic = "[英美发音]";
+
+        // Extract phonetic symbols block if present (e.g. "[juː]" or "/nəʊ/")
+        const phoneticMatch = clean.match(/\[([^[\]]{1,25}?[ːaeiouəbdfg/\\tʃdʒθðʃʒ\d\s][^[\]]*?)\]|\/([^/]{1,25}?)\//);
+        if (phoneticMatch) {
+          phonetic = phoneticMatch[0];
+          // Strip phonetics from matching text path
+          clean = clean.replace(phoneticMatch[0], " ").replace(/\s{2,}/g, " ").trim();
+        }
+
+        // Try Route 1: Split English words that transition to Part-of-speech tags or block brackets or Chinese characters
+        const transitionMatch = clean.match(/^([a-zA-Z\s\-']+?)(?:\s+)?(\b(?:n|v|vt|vi|adj|adv|prep|conj|pron|num|art|int|aux)\.|\b\[[a-zA-Z\u4e00-\u9fa5]+\]|[\u4e00-\u9fa5]+|[\(\（]+[\u4e00-\u9fa5]+)(.*)$/);
+        
+        if (transitionMatch) {
+          word = transitionMatch[1].trim();
+          translation = (transitionMatch[2] + transitionMatch[3]).trim();
+        }
+
+        // Try Route 2: Fallback to Comma CSV separation [word, translation]
+        if (!word && clean.includes(",")) {
+          const commaIdx = clean.indexOf(",");
+          const wTemp = clean.substring(0, commaIdx).trim();
+          const mTemp = clean.substring(commaIdx + 1).trim();
+          if (/^[a-zA-Z\s\-']+$/.test(wTemp)) {
             word = wTemp;
             translation = mTemp;
           }
         }
-      }
 
-      if (word && translation) {
-        const lowerW = word.toLowerCase();
-        if (!seenWords.has(lowerW)) {
-          seenWords.add(lowerW);
-          parsedItems.push({
-            word,
-            translation,
-            phonetic: "[英美发音]",
-            example: "来自于您的上传记词账本。"
-          });
+        // Try Route 3: Fallback to Tab separations [word \t meanings]
+        if (!word && clean.includes("\t")) {
+          const parts = clean.split("\t").map(x => x.trim()).filter(x => x.length > 0);
+          if (parts.length >= 2 && /^[a-zA-Z\s\-']+$/.test(parts[0])) {
+            word = parts[0];
+            translation = parts.slice(1).join(" ");
+          }
+        }
+
+        // Try Route 4: Fallback to simple Space bounds separating English word from rest
+        if (!word) {
+          const regexMatch = clean.match(/^([a-zA-Z\s\-']+?)[\s\t]+(.*)$/);
+          if (regexMatch) {
+            const wTemp = regexMatch[1].trim();
+            const mTemp = regexMatch[2].trim();
+            if (wTemp.length > 1 && mTemp.length > 0) {
+              word = wTemp;
+              translation = mTemp;
+            }
+          }
+        }
+
+        if (word && translation) {
+          const lowerW = word.toLowerCase();
+          if (!seenWords.has(lowerW)) {
+            seenWords.add(lowerW);
+            parsedItems.push({
+              word,
+              translation,
+              phonetic,
+              example: "来自于您的自选词表。"
+            });
+          }
         }
       }
     }
@@ -638,7 +909,7 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
               type="file"
               id="words-file-uploader"
               onChange={handleFileChange}
-              accept=".txt,.csv"
+              accept=".txt,.csv,.md,.json,.xlsx,.xls,.pdf"
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
             />
             
@@ -647,9 +918,9 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
                 <FileUp size={24} />
               </div>
               <div>
-                <p className="text-sm font-bold text-[#1A1A1A]">拖拽或点击上传您的英语单词表 (.txt, .csv)</p>
+                <p className="text-sm font-bold text-[#1A1A1A]">拖拽或点击上传您的英语单词表文档</p>
                 <p className="text-xs text-[#1A1A1A]/50 mt-1.5 leading-relaxed font-sans">
-                  完美支持 PDF 文档文字提取、词汇表导出、制表符或逗号分隔对 (格式: word, 释义)。
+                  已全面支持 <strong>高精度 PDF 单词表 (.pdf)</strong>、Excel 电子表格 (.xlsx, .xls)、JSON 配置、Markdown 笔记 (.md) 及 plain 文本与逗号分隔 (.csv, .txt)。
                 </p>
               </div>
             </div>
@@ -723,17 +994,26 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
             </div>
           )}
 
-          {/* Quick Guide & Formatting Guidelines */}
+           {/* Quick Guide & Formatting Guidelines */}
           <div className="bg-[#1A1A1A]/5 border border-[#1A1A1A]/10 p-4 rounded-xl text-xs space-y-2 leading-relaxed">
-            <h5 className="font-serif font-black">词表文件建议格式指南 GUIDELINES</h5>
+            <h5 className="font-serif font-black">多端多格式词表支持建议指南 GUIDELINES</h5>
             <p className="text-[#1A1A1A]/60 font-medium">
-              文件内容支持文本、表格导出的纯文本或普通的 .csv 文件，格式建议为：
+              系统配备了智能词频与语意分词器，完美适应各种导出形式、PDF原版及多栏排版布局：
             </p>
-            <ul className="list-disc pl-4 text-[#1A1A1A]/60 font-mono space-y-1 text-[11px] font-bold">
-              <li>标准逗号分隔: <span className="text-gray-900 border-b border-b-gray-400">ambition, n. 抱负，野心</span></li>
-              <li>标准空格配对: <span className="text-gray-900 border-b border-b-gray-400">conquer vt. 征服，占领</span></li>
-              <li>PDF 复制行: <span className="text-gray-900 border-b border-b-gray-400">221 correlation n. 相互关系，关联</span></li>
-            </ul>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[#1A1A1A]/60 text-[11px] font-sans">
+              <div>
+                <span className="font-bold text-[#1A1A1A] block mb-1">📊 1. 电子表格、数据配置 & PDF 直接上传:</span>
+                <p className="leading-relaxed">
+                  Excel (.xlsx, .xls) 自适应提取；JSON 可以是字典对象数组或键值对。<strong>PDF 词表 (.pdf)</strong> 无论单双栏、有无音标，都能智能重构段落流，识别提取！
+                </p>
+              </div>
+              <div>
+                <span className="font-bold text-[#1A1A1A] block mb-1">📖 2. 传统文本 & 双面/双栏打印复制:</span>
+                <p className="leading-relaxed">
+                  支持多达 3 栏并排词表（例如：<code className="bg-black/5 px-1 rounded">you [juː] [代] 你 22 no [副] 不</code>），系统在载入时能智能拆解提取所有排版的词汇词组对。
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}

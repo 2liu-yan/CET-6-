@@ -15,8 +15,8 @@ export default function App() {
   // Navigation Tabs state
   const [activeTab, setActiveTab] = useState<"stories" | "ai-creator" | "notebook" | "quiz">("stories");
 
-  // WeChat Mini Program / Mobile Emulation preview wrapper toggler (Desktop only helper)
-  const [isWechatMockFrame, setIsWechatMockFrame] = useState(false);
+  // WeChat Mini Program / Tablet / Web layout display emulator modes ("fluid" defaults to host client's real viewport)
+  const [deviceDisplayMode, setDeviceDisplayMode] = useState<"phone" | "tablet" | "fluid">("fluid");
 
   // Multi-device sync scanning helper popup
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -145,7 +145,13 @@ export default function App() {
 
   // Emulation container styling wrapper helper
   const AppContent = (
-    <div className={`flex flex-col flex-1 ${isWechatMockFrame ? "max-h-[780px] overflow-y-auto" : ""}`}>
+    <div className={`flex flex-col flex-1 ${
+      deviceDisplayMode === "phone" 
+        ? "max-h-[780px] overflow-y-auto" 
+        : deviceDisplayMode === "tablet" 
+        ? "max-h-[890px] overflow-y-auto" 
+        : ""
+    }`}>
       {/* WeChat Mini Program Capsule Header Mockup on mobile, standard editorial on larger viewports */}
       <header className="bg-[#FDFCFB] border-b border-[#1A1A1A]/10 sticky top-0 z-40 transition-all">
         <div className="w-full max-w-7xl mx-auto px-4 md:px-8 py-4 flex items-center justify-between">
@@ -448,43 +454,65 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F3F2EE] text-[#1A1A1A] flex flex-col font-sans selection:bg-[#1A1A1A] selection:text-white">
-      {/* Desktop Helper Panel: Emulate WeChat / Smartphone viewport mockup for developers */}
-      <div className="bg-white border-b border-[#1A1A1A]/10 px-4 py-2 flex items-center justify-between text-xs font-semibold z-50">
+      {/* Desktop Helper Panel: Emulate WeChat / Smartphone / Tablet viewports */}
+      <div className="bg-white border-b border-[#1A1A1A]/10 px-4 py-2.5 flex flex-wrap items-center justify-between text-xs font-semibold z-50 gap-4">
         <div className="flex items-center gap-2 text-[#1A1A1A]/60">
-          <Smartphone size={13} className="text-emerald-700" />
-          <span>小程序自适应运行控制：可自如选择多端交互模式</span>
+          <Tablet size={13} className="text-emerald-700 animate-pulse" />
+          <span>小程序自适应多端适配：已全方位优化自适应支持 Android 安卓平板、手机与全大屏设备</span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsWechatMockFrame(!isWechatMockFrame)}
-            className="px-3 py-1 bg-[#1A1A1A]/5 hover:bg-[#1A1A1A]/10 rounded border border-[#1A1A1A]/15 text-[#1A1A1A] hover:text-black transition-all cursor-pointer font-bold flex items-center gap-1.5"
-          >
-            {isWechatMockFrame ? (
-              <>
-                <Monitor size={12} />
-                <span>切为大平板/桌面极宽屏模式</span>
-              </>
-            ) : (
-              <>
-                <Smartphone size={12} className="text-emerald-800" />
-                <span>切为标准 1:1 微信小程序移动框</span>
-              </>
-            )}
-          </button>
+        <div className="flex items-center gap-3">
+          {/* Segment display controls */}
+          <div className="flex items-center bg-black/[0.04] p-1 rounded-xl border border-black/[0.08]">
+            <button
+              onClick={() => setDeviceDisplayMode("phone")}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer font-bold text-[11px] ${
+                deviceDisplayMode === "phone"
+                  ? "bg-white text-emerald-800 shadow-xs border border-[#1A1A1A]/10"
+                  : "text-[#1A1A1A]/65 hover:text-black"
+              }`}
+            >
+              <Smartphone size={13} />
+              <span>手机视图 (1:1)</span>
+            </button>
+            
+            <button
+              onClick={() => setDeviceDisplayMode("tablet")}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer font-bold text-[11px] ${
+                deviceDisplayMode === "tablet"
+                  ? "bg-white text-emerald-800 shadow-xs border border-[#1A1A1A]/10"
+                  : "text-[#1A1A1A]/65 hover:text-black"
+              }`}
+            >
+              <Tablet size={13} />
+              <span>安卓平板模拟 (840px)</span>
+            </button>
+
+            <button
+              onClick={() => setDeviceDisplayMode("fluid")}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer font-bold text-[11px] ${
+                deviceDisplayMode === "fluid"
+                  ? "bg-white text-emerald-800 shadow-xs border border-[#1A1A1A]/10"
+                  : "text-[#1A1A1A]/65 hover:text-black"
+              }`}
+            >
+              <Monitor size={13} />
+              <span>自动流式 (Fluid)</span>
+            </button>
+          </div>
 
           <button
             onClick={() => setShowSyncModal(true)}
-            className="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold rounded border border-emerald-300 transition-all cursor-pointer flex items-center gap-1.5"
+            className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold rounded-xl border border-emerald-300 transition-all cursor-pointer flex items-center gap-1.5 text-[11px]"
           >
             <QrCode size={12} />
-            <span>极速同步微信平板或手机</span>
+            <span>极速手机/平板扫码同步</span>
           </button>
         </div>
       </div>
 
       <div className="flex-1 flex justify-center items-center py-4 md:py-6 relative overflow-x-hidden">
-        {isWechatMockFrame ? (
+        {deviceDisplayMode === "phone" ? (
           /* Phone/Mini Program mockup style shell envelope */
           <div className="relative w-[395px] h-[820px] bg-[#FAF9F6] border-8 border-black rounded-[40px] shadow-2xl overflow-hidden flex flex-col animate-[fadeIn_0.5s_ease]">
             {/* Phone speaker/camera pill */}
@@ -504,6 +532,32 @@ export default function App() {
             </div>
 
             {/* Inner responsive WeChat Client content */}
+            <div className="flex-1 flex flex-col overflow-hidden bg-[#FDFCFB]">
+              {AppContent}
+            </div>
+          </div>
+        ) : deviceDisplayMode === "tablet" ? (
+          /* High-Fidelity Android Tablet mockup styling frame */
+          <div className="relative w-[840px] h-[960px] bg-[#FAF9F6] border-12 border-neutral-800 rounded-[32px] shadow-2xl overflow-hidden flex flex-col animate-[fadeIn_0.5s_ease]">
+            {/* Camera dot on current center bezel */}
+            <div className="absolute top-3.5 left-1/2 -translate-x-1/2 w-2 h-2 bg-neutral-900 rounded-full z-50"></div>
+            
+            {/* Tablet standard Status details */}
+            <div className="bg-[#FAF9F6] h-10 w-full pt-2 px-8 flex justify-between items-center text-[10.5px] text-[#1A1A1A]/70 font-mono font-bold z-50">
+              <div className="flex items-center gap-2">
+                <span>09:41 AM</span>
+                <span className="text-[9px] uppercase tracking-wider bg-black/5 px-2 py-0.5 rounded-md">安卓平板微端模式</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="bg-emerald-600 text-white text-[9px] font-sans px-1.5 py-0.5 rounded-sm">WiFi 6</span>
+                <span className="w-4.5 h-2.5 rounded-sm border border-[#1A1A1A]/40 flex items-center p-px">
+                  <span className="bg-[#1A1A1A] h-full w-full rounded-2xs"></span>
+                </span>
+                <span className="text-[10px]">100%</span>
+              </div>
+            </div>
+
+            {/* Tablet dynamic client view area */}
             <div className="flex-1 flex flex-col overflow-hidden bg-[#FDFCFB]">
               {AppContent}
             </div>

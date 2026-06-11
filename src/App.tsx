@@ -22,7 +22,16 @@ export default function App() {
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const sharedProductionUrl = "https://ais-pre-jvwezet5vityj72lp4fnjx-565245898863.asia-northeast1.run.app";
+  // Fallback to active metadata url, then dynamically resolve to current window location on mount
+  const [sharedProductionUrl, setSharedProductionUrl] = useState("https://ais-pre-jvwezet5vityj72lp4fnjx-565245898863.asia-northeast1.run.app");
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location) {
+      // Dynamically resolve to the exact active domain preview/shared path
+      const activeUrl = window.location.origin + window.location.pathname;
+      setSharedProductionUrl(activeUrl);
+    }
+  }, []);
 
   // Unlocked / Library Stories: Predefined + User's Custom Stories
   const [stories, setStories] = useState<Story[]>(() => {

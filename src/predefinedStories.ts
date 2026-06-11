@@ -3,6 +3,7 @@ export interface WordItem {
   translation: string;
   phonetic?: string;
   example?: string;
+  pageNumber?: number;
 }
 
 export interface Story {
@@ -12,6 +13,8 @@ export interface Story {
   emoji: string;
   text: string;
   words: WordItem[];
+  boardId?: string;
+  pageNumber?: number;
 }
 
 export const PREDEFINED_STORIES: Story[] = [

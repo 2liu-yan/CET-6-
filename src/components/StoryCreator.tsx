@@ -3,18 +3,28 @@ import { Sparkles, FileText, ChevronRight, HelpCircle, Loader, RefreshCw, AlertC
 import { Story, WordItem } from "../predefinedStories";
 import * as XLSX from "xlsx";
 
-interface StoryCreatorProps {
-  onStoryGenerated: (story: Story) => void;
-}
-
-interface CustomBoard {
+export interface CustomBoard {
   id: string;
   name: string;
   uploadedAt: string;
   words: WordItem[];
 }
 
-export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
+interface StoryCreatorProps {
+  onStoryGenerated: (story: Story) => void;
+  customBoards: CustomBoard[];
+  setCustomBoards: React.Dispatch<React.SetStateAction<CustomBoard[]>>;
+  selectedBoardId: string | null;
+  setSelectedBoardId: (id: string | null) => void;
+}
+
+export default function StoryCreator({ 
+  onStoryGenerated,
+  customBoards,
+  setCustomBoards,
+  selectedBoardId,
+  setSelectedBoardId
+}: StoryCreatorProps) {
   // Mode tabs: 1. Manual words, 2. Text analyzer, 3. Custom file uploader (New!)
   const [activeTab, setActiveTab] = useState<"words" | "analyzer" | "uploader">("words");
   
@@ -26,22 +36,6 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
   const [rawText, setRawText] = useState<string>(
     `The research group at the chemistry institute was trying to synthesize a synthetic hormone. However, due to temporary power failure, all automatic systems collapsed, and they had to substitute manual cooling devices. This led to a permanent impact on their results...`
   );
-  
-  // Tab 3: Custom uploader states
-  const [customBoards, setCustomBoards] = useState<CustomBoard[]>(() => {
-    const saved = localStorage.getItem("cet6_custom_boards");
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [selectedBoardId, setSelectedBoardId] = useState<string | null>(() => {
-    const saved = localStorage.getItem("cet6_custom_boards");
-    if (saved) {
-      const decoded = JSON.parse(saved);
-      if (Array.isArray(decoded) && decoded.length > 0) {
-        return decoded[0].id;
-      }
-    }
-    return null;
-  });
   
   const [dragActive, setDragActive] = useState(false);
   const [parsingResult, setParsingResult] = useState<{ fileName: string; words: WordItem[] } | null>(null);
@@ -59,11 +53,6 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
     { label: "情绪心理行为", words: "anxiety, depress, compromise, tolerate, guarantee, hesitate" },
     { label: "社会经济结构", words: "prosperity, inflation, transaction, consume, wholesale, retail" },
   ];
-
-  // Sync custom upload list back to localStorage
-  useEffect(() => {
-    localStorage.setItem("cet6_custom_boards", JSON.stringify(customBoards));
-  }, [customBoards]);
 
   // Handle Drag Over
   const handleDrag = (e: React.DragEvent) => {
@@ -94,97 +83,6 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
     }
   };
 
-  // Load and Parse PDF files client-side using PDF.js CDN
-  const loadAndParsePDF = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-    // Ensure pdf.js is loaded dynamically if not present
-    await new Promise<void>((resolve, reject) => {
-      if ((window as any).pdfjsLib || (window as any)['pdfjs-dist/build/pdf']) {
-        resolve();
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js";
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error("高精度 PDF 解析器驱动包加载失败，请检查网络连接！"));
-      document.head.appendChild(script);
-    });
-
-    const pdfjsLib = (window as any).pdfjsLib || (window as any)['pdfjs-dist/build/pdf'];
-    if (!pdfjsLib) {
-      throw new Error("PDF 解析器初始化不完整，请稍后刷新重试！");
-    }
-
-    // Configure worker from CDN to optimize multi-page streaming
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js";
-
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-    const pdf = await loadingTask.promise;
-    
-    let completeText = "";
-    
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const items = textContent.items as any[];
-      
-      const linesMap: { [key: number]: any[] } = {};
-      const tolerance = 4; // Tolerance distance for row alignment
-      
-      items.forEach((item) => {
-        if (!item.str || !item.str.trim()) return;
-        const y = item.transform[5];
-        const x = item.transform[4];
-        
-        let foundYKey: number | null = null;
-        for (const existingY of Object.keys(linesMap).map(Number)) {
-          if (Math.abs(existingY - y) <= tolerance) {
-            foundYKey = existingY;
-            break;
-          }
-        }
-        
-        if (foundYKey !== null) {
-          linesMap[foundYKey].push({ x, str: item.str });
-        } else {
-          linesMap[y] = [{ x, str: item.str }];
-        }
-      });
-      
-      // Sort baselines descending (top-to-bottom on page layout)
-      const sortedBaselines = Object.keys(linesMap)
-        .map(Number)
-        .sort((a, b) => b - a);
-        
-      let pageText = "";
-      sortedBaselines.forEach((y) => {
-        const rowItems = linesMap[y].sort((a, b) => a.x - b.x);
-        let lineStr = "";
-        let prevXEnd = -1;
-        
-        rowItems.forEach((item, index) => {
-          if (index === 0) {
-            lineStr += item.str;
-          } else {
-            const gap = item.x - prevXEnd;
-            if (gap > 12) {
-              lineStr += "    " + item.str; // Broad spaces perfectly retain dual-side splits
-            } else {
-              lineStr += " " + item.str;
-            }
-          }
-          prevXEnd = item.x + (item.str.length * 6); // rough characters-width estimation
-        });
-        
-        pageText += lineStr + "\n";
-      });
-      
-      completeText += `==Start of Page ${pageNum}==\n` + pageText + `==End of Page ${pageNum}==\n\n`;
-    }
-    
-    return completeText;
-  };
-
   // Parsing Core Algorithm - matches CSV, TXT, Excel sheets, JSON dictionary lists, multi-column PDF layouts, and dual-side OCR
   const processFile = (file: File) => {
     setErrorMsg("");
@@ -200,7 +98,6 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
 
     const isExcel = ext === ".xlsx" || ext === ".xls";
     const isPDF = ext === ".pdf";
-    const isBinary = isExcel || isPDF;
     const reader = new FileReader();
 
     reader.onload = async (event) => {
@@ -208,10 +105,28 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
         let wordsList: WordItem[] = [];
         
         if (isPDF) {
-          const arrayBuffer = event.target?.result as ArrayBuffer;
-          setSuccessMsg("正为您启动高精度 PDF 引擎，智能重构词表排版并提取词组...");
-          const text = await loadAndParsePDF(arrayBuffer);
-          wordsList = parseGenericList(text);
+          const dataUrl = event.target?.result as string;
+          if (!dataUrl) {
+            throw new Error("无法读取 PDF 数据流！");
+          }
+          const base64 = dataUrl.split(",")[1];
+          setSuccessMsg("已连接服务端高精度 PDF 引擎，智能重构词表并重构排版...");
+          
+          const response = await fetch("/api/parse-pdf", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fileBase64: base64,
+              fileName: file.name
+            })
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || "服务端解析 PDF 遇到异常，请检查文件完整度！");
+          }
+
+          wordsList = parseGenericList(data.text || "");
         } else if (isExcel) {
           const arrayBuffer = event.target?.result as ArrayBuffer;
           wordsList = parseExcelList(arrayBuffer);
@@ -256,7 +171,9 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
       setErrorMsg("在读取外置文件流时发生系统错误！");
     };
 
-    if (isBinary) {
+    if (isPDF) {
+      reader.readAsDataURL(file);
+    } else if (isExcel) {
       reader.readAsArrayBuffer(file);
     } else {
       reader.readAsText(file);
@@ -376,10 +293,22 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
     const lines = contents.split(/\r?\n/);
     const parsedItems: WordItem[] = [];
     const seenWords = new Set<string>();
+    let currentParsedPage = 1;
 
     for (let rawLine of lines) {
       rawLine = rawLine.trim();
       if (!rawLine) continue;
+
+      if (rawLine.startsWith("==Start of Page ")) {
+        const pageMatch = rawLine.match(/==Start of Page (\d+)==/);
+        if (pageMatch) {
+          currentParsedPage = parseInt(pageMatch[1], 10);
+        }
+        continue;
+      }
+      if (rawLine.startsWith("==End of Page ")) {
+        continue;
+      }
 
       // Filter out general table headers, footer counters or metadata lines
       if (/^(word\s+meaning|word|meaning)$/i.test(rawLine)) continue;
@@ -476,7 +405,8 @@ export default function StoryCreator({ onStoryGenerated }: StoryCreatorProps) {
               word,
               translation,
               phonetic,
-              example: "来自于您的自选词表。"
+              example: "来自于您的自选词表。",
+              pageNumber: currentParsedPage
             });
           }
         }

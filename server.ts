@@ -3,6 +3,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+// @ts-ignore
+import pdfParse from "pdf-parse";
 
 dotenv.config();
 
@@ -123,6 +125,56 @@ ${text}
     const unique = Array.from(new Set(found.map((w) => w.toLowerCase()))).filter((w) => w.length > 3);
     const mockOutput = unique.slice(0, 15).map(w => ({ word: w, translation: "提取自内容" }));
     res.json({ words: mockOutput });
+  }
+});
+
+// API endpoint to parse PDF server-side using pdf-parse to bypass browser CSP/iframe blocks
+app.post("/api/parse-pdf", async (req, res) => {
+  const { fileBase64, fileName } = req.body;
+
+  if (!fileBase64) {
+    return res.status(400).json({ error: "没有接收到有效的文件数据流！" });
+  }
+
+  try {
+    const dataBuffer = Buffer.from(fileBase64, "base64");
+    
+    // Custom page rendering function to inject Page Boundaries
+    const renderPage = (pageData: any) => {
+      const pageNumber = pageData.pageIndex + 1;
+      return pageData.getTextContent().then((textContent: any) => {
+        let lastY: any = null;
+        let lastX = 0;
+        let text = `==Start of Page ${pageNumber}==\n`;
+        
+        for (let item of textContent.items) {
+          if (lastY === item.transform[5] || lastY === null) {
+            const gap = item.transform[4] - lastX;
+            if (gap > 12) {
+              text += "    " + item.str;
+            } else {
+              text += " " + item.str;
+            }
+          } else {
+            text += "\n" + item.str;
+          }
+          lastY = item.transform[5];
+          lastX = item.transform[4] + (item.str.length * 6);
+        }
+        text += `\n==End of Page ${pageNumber}==\n\n`;
+        return text;
+      });
+    };
+
+    const options = {
+      pagerender: renderPage
+    };
+
+    const parsedData = await pdfParse(dataBuffer, options);
+    res.json({ text: parsedData.text });
+  } catch (err: any) {
+    console.error("PDF Parsing Server Error:", err);
+    res.status(500).json({ error: `服务器端 PDF 引擎解析失败: ${err.message || err}` });
   }
 });
 

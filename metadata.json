@@ -1,0 +1,8 @@
+{
+  "name": "CET-6 经典词汇故事记忆法",
+  "description": "基于趣味故事联想快速记忆大学英语六级词汇的智能应用，支持AI一键生成专属记忆故事与交互式词卡、TTS语音及测验。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-serif: "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --color-editorial-bg: #FDFCFB;
+  --color-editorial-card: #FAF9F6;
+  --color-editorial-dark: #1A1A1A;
+}
+
+/* Card-flipping standard styles for flashcards */
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Additional layout styles */
+body {
+  background-color: #FDFCFB;
+  color: #1A1A1A;
+}
